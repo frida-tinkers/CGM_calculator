@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#20302F">
+<title>CGM Accuracy Check</title>
+<style>
+  :root {
+    --page: #DDE4E0;
+    --body: #20302F;
+    --body-edge: #121C1B;
+    --lcd: #CFE0C8;
+    --lcd-ink: #14261B;
+    --lcd-dim: #55705C;
+    --lcd-select: #B9D0B0;
+    --pass: #0E5A2E;
+    --fail: #9C1F16;
+    --key: #EAEEEC;
+    --key-edge: #A9B3AE;
+    --key-ink: #17211F;
+    --fn: #C7D0CC;
+    --clear: #E8A89E;
+    --go: #17844A;
+    --go-edge: #0C5A30;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--page);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--key-ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+    gap: 14px;
+  }
+  .device {
+    width: 100%;
+    max-width: 360px;
+    background: var(--body);
+    border-radius: 26px;
+    padding: 18px 16px 20px;
+    box-shadow: 0 2px 0 #3B4F4D inset, 0 10px 0 var(--body-edge), 0 18px 28px rgba(18, 28, 27, .35);
+  }
+  .brand {
+    margin: 0 4px 10px;
+    color: #A8BDB6;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .brand span:last-child { font-weight: 400; font-size: 12px; color: #8CA39C; }
+
+  .lcd {
+    background: var(--lcd);
+    color: var(--lcd-ink);
+    border-radius: 12px;
+    padding: 8px 8px 12px;
+    box-shadow: 0 3px 8px rgba(0,0,0,.35) inset;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .field {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: baseline;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .field .label { font-size: 13px; color: var(--lcd-dim); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .field .value { font-size: 40px; font-weight: 700; line-height: 1.05; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+  .field .value.empty { color: var(--lcd-dim); opacity: .55; }
+  .field[aria-pressed="true"] { background: var(--lcd-select); box-shadow: 0 0 0 2px var(--lcd-ink) inset; }
+  .field:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+  .field[aria-pressed="true"] .value:not(.empty)::after,
+  .field[aria-pressed="true"] .value.empty::after { content: ""; }
+
+  .result {
+    margin: 8px 6px 0;
+    padding-top: 10px;
+    border-top: 2px solid var(--lcd-dim);
+    min-height: 140px;
+  }
+  .verdict { font-size: 46px; font-weight: 800; line-height: 1; letter-spacing: .02em; }
+  .verdict.pass { color: var(--pass); }
+  .verdict.fail { color: var(--fail); }
+  .verdict.idle { font-size: 16px; font-weight: 500; color: var(--lcd-dim); line-height: 1.4; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .detail { margin-top: 8px; font-size: 14px; line-height: 1.5; }
+  .detail b { font-weight: 700; }
+  .rule { margin-top: 6px; font-size: 12.5px; color: var(--lcd-dim); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .warn { margin-top: 6px; font-size: 12.5px; font-weight: 600; color: var(--fail); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+  .keys {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 58px);
+    gap: 10px;
+  }
+  .key {
+    font: inherit;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--key-ink);
+    background: var(--key);
+    border: 0;
+    border-radius: 12px;
+    box-shadow: 0 4px 0 var(--key-edge);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform .06s, box-shadow .06s;
+  }
+  .key:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--key-edge); }
+  .key:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+  .key.fn { background: var(--fn); font-size: 20px; }
+  .key.clear { background: var(--clear); font-size: 20px; }
+  .key.zero { grid-column: span 3; }
+  .key.go {
+    grid-row: span 2;
+    background: var(--go);
+    color: #fff;
+    font-size: 19px;
+    box-shadow: 0 4px 0 var(--go-edge);
+    line-height: 1.25;
+  }
+  .key.go:active { box-shadow: 0 1px 0 var(--go-edge); }
+
+  .foot { max-width: 360px; text-align: center; font-size: 12.5px; line-height: 1.5; color: #46564F; }
+
+  @media (prefers-reduced-motion: reduce) { .key { transition: none; } }
+  @media (max-height: 700px) { .keys { grid-template-rows: repeat(4, 50px); } .result { min-height: 128px; } }
+</style>
+</head>
+<body>
+  <main class="device" aria-label="CGM accuracy calculator">
+    <div class="brand"><span>CGM Accuracy Check</span><span>20/20 rule</span></div>
+
+    <section class="lcd">
+      <button class="field" id="fCgm" type="button" aria-pressed="true">
+        <span class="label">CGM reading</span><span class="value empty" id="vCgm">---</span>
+      </button>
+      <button class="field" id="fFs" type="button" aria-pressed="false">
+        <span class="label">Fingerstick</span><span class="value empty" id="vFs">---</span>
+      </button>
+      <div class="result" id="result" aria-live="polite"></div>
+    </section>
+
+    <div class="keys" id="keys">
+      <button class="key" data-k="7">7</button>
+      <button class="key" data-k="8">8</button>
+      <button class="key" data-k="9">9</button>
+      <button class="key fn" data-k="back" aria-label="Delete last digit">&#9003;</button>
+
+      <button class="key" data-k="4">4</button>
+      <button class="key" data-k="5">5</button>
+      <button class="key" data-k="6">6</button>
+      <button class="key clear" data-k="clear" aria-label="Clear both numbers">Clear</button>
+
+      <button class="key" data-k="1">1</button>
+      <button class="key" data-k="2">2</button>
+      <button class="key" data-k="3">3</button>
+      <button class="key go" data-k="next" id="next">Next</button>
+
+      <button class="key zero" data-k="0">0</button>
+    </div>
+  </main>
+
+  <p class="foot">CGM 80 or below: fingerstick must be within 20 points.<br>
+  CGM above 80: CGM must be within 20% of the fingerstick.<br>
+  Confirm the rule against your official work instruction.</p>
+
+<script>
+  // ---- Rule settings (change here if the official work instruction differs) ----
+  var SWITCH_AT = 80;      // CGM at or below this uses the points rule
+  var POINTS = 20;         // mg/dL allowed when CGM is at or below SWITCH_AT
+  var PERCENT = 20;        // percent of the fingerstick allowed when CGM is above SWITCH_AT
+  // -----------------------------------------------------------------------------
+
+  var state = { cgm: "", fs: "", active: "cgm", fresh: false };
+
+  var el = {
+    fCgm: document.getElementById("fCgm"), fFs: document.getElementById("fFs"),
+    vCgm: document.getElementById("vCgm"), vFs: document.getElementById("vFs"),
+    result: document.getElementById("result"), next: document.getElementById("next")
+  };
+
+  // Integer math so edge cases (exactly 20%) are never off by a rounding error.
+  function check(cgm, fs) {
+    var diff = Math.abs(cgm - fs);
+    var usesPoints = cgm <= SWITCH_AT;
+    var pass, lo, hi;
+    if (usesPoints) {
+      pass = diff <= POINTS;
+      lo = cgm - POINTS; hi = cgm + POINTS;
+    } else {
+      pass = diff * 100 <= PERCENT * fs;
+      // fingerstick low end = cgm / (1 + p), round up; high end = cgm / (1 - p), round down
+      lo = Math.floor((cgm * 100 + (100 + PERCENT) - 1) / (100 + PERCENT));
+      hi = Math.floor((cgm * 100) / (100 - PERCENT));
+    }
+    return { pass: pass, usesPoints: usesPoints, lo: Math.max(lo, 0), hi: hi, diff: cgm - fs };
+  }
+
+  function render() {
+    el.vCgm.textContent = state.cgm === "" ? "---" : state.cgm;
+    el.vFs.textContent = state.fs === "" ? "---" : state.fs;
+    el.vCgm.className = "value" + (state.cgm === "" ? " empty" : "");
+    el.vFs.className = "value" + (state.fs === "" ? " empty" : "");
+    el.fCgm.setAttribute("aria-pressed", state.active === "cgm");
+    el.fFs.setAttribute("aria-pressed", state.active === "fs");
+
+    var c = parseInt(state.cgm, 10), f = parseInt(state.fs, 10);
+    var out = "";
+    if (state.cgm === "" && state.fs === "") {
+      out = '<div class="verdict idle">Type the CGM reading, tap Next, then type the fingerstick.</div>';
+      el.next.textContent = "Next";
+    } else if (state.cgm === "" || state.fs === "" || c === 0 || f === 0) {
+      var missing = (state.cgm === "" || c === 0) ? "the CGM reading" : "the fingerstick";
+      out = '<div class="verdict idle">Waiting for ' + missing + '.</div>';
+    } else {
+      var r = check(c, f);
+      var pct = Math.abs(r.diff) / f * 100;
+      var dir = r.diff === 0 ? "exact match" : (r.diff > 0 ? "CGM reads higher" : "CGM reads lower");
+      out = '<div class="verdict ' + (r.pass ? "pass" : "fail") + '">' + (r.pass ? "PASS" : "FAIL") + '</div>' +
+        '<div class="detail"><b>' + Math.abs(r.diff) + ' points</b> apart (' + pct.toFixed(1) + '% of fingerstick), ' + dir + '.<br>' +
+        'For CGM ' + c + ', fingerstick must be <b>' + r.lo + ' to ' + r.hi + '</b>.</div>' +
+        '<div class="rule">' + (r.usesPoints
+          ? 'CGM ' + SWITCH_AT + ' or below: within ' + POINTS + ' points.'
+          : 'CGM above ' + SWITCH_AT + ': within ' + PERCENT + '% of fingerstick.') + '</div>';
+      if (c < 40 || c > 400) out += '<div class="warn">Dexcom reads 40 to 400. Double-check the CGM number.</div>';
+    }
+    el.result.innerHTML = out;
+    el.next.textContent = state.active === "cgm" ? "Next: fingerstick" : "Next: CGM";
+  }
+
+  function select(which) {
+    state.active = which;
+    state.fresh = state[which] !== "";   // first digit replaces an existing value
+    render();
+  }
+
+  function digit(d) {
+    var key = state.active;
+    var cur = state.fresh ? "" : state[key];
+    state.fresh = false;
+    if (cur.length >= 3) return;
+    if (cur === "" && d === "0") { /* allow a lone 0 only as a placeholder for nothing */ return; }
+    state[key] = cur + d;
+    render();
+  }
+
+  function back() {
+    var key = state.active;
+    state.fresh = false;
+    state[key] = state[key].slice(0, -1);
+    render();
+  }
+
+  function clearAll() {
+    state.cgm = ""; state.fs = ""; state.active = "cgm"; state.fresh = false;
+    render();
+  }
+
+  function next() { select(state.active === "cgm" ? "fs" : "cgm"); }
+
+  document.getElementById("keys").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-k]");
+    if (!b) return;
+    var k = b.getAttribute("data-k");
+    if (e.detail > 0) b.blur();   // mouse/touch taps: let the keyboard Enter key mean "Next"
+    if (k >= "0" && k <= "9" && k.length === 1) digit(k);
+    else if (k === "back") back();
+    else if (k === "clear") clearAll();
+    else if (k === "next") next();
+  });
+  el.fCgm.addEventListener("click", function () { select("cgm"); });
+  el.fFs.addEventListener("click", function () { select("fs"); });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key >= "0" && e.key <= "9") { digit(e.key); e.preventDefault(); }
+    else if (e.key === "Backspace") { back(); e.preventDefault(); }
+    else if (e.key === "Escape" || e.key.toLowerCase() === "c") { clearAll(); }
+    else if (e.key === "Enter" && !(document.activeElement && document.activeElement.tagName === "BUTTON")) { next(); e.preventDefault(); }
+  });
+
+  render();
+</script>
+</body>
+</html>
