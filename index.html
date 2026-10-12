@@ -9,6 +9,16 @@
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="site.webmanifest">
+    .device-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
+  .device-pick button {
+    font: inherit; border: 0; border-radius: 10px; padding: 8px 6px;
+    background: #2E4543; color: #C3D4CE; cursor: pointer; line-height: 1.2;
+    touch-action: manipulation;
+  }
+  .device-pick button b { display: block; font-size: 16px; }
+  .device-pick button small { display: block; font-size: 11.5px; }
+  .device-pick button[aria-pressed="true"] { background: var(--lcd); color: var(--lcd-ink); }
+  .device-pick button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 <style>
   :root {
     --page: #DDE4E0;
@@ -153,7 +163,10 @@
 <body>
   <main class="device" aria-label="CGM accuracy calculator">
     <div class="brand"><span>CGM Accuracy Check</span><span>20/20 rule</span></div>
-
+    <div class="device-pick" role="group" aria-label="Which Dexcom system">
+      <button type="button" id="btnG6" aria-pressed="false"><b>G6</b><small>Dexcom ONE</small></button>
+      <button type="button" id="btnG7" aria-pressed="false"><b>G7</b><small>15 Day, ONE+, Flex</small></button>
+    </div>
     <section class="lcd">
       <button class="field" id="fCgm" type="button" aria-pressed="true">
         <span class="label">CGM reading</span><span class="value empty" id="vCgm">---</span>
@@ -184,40 +197,48 @@
     </div>
   </main>
 
-  <p class="foot">CGM 80 or below: fingerstick must be within 20 points.<br>
-  CGM above 80: CGM must be within 20% of the fingerstick.<br>
-  Confirm the rule against your official work instruction.<br>
+  <p class="foot">Rules follow Dexcom's published accuracy table. The fingerstick decides which rule applies.<br>
+G6 / Dexcom ONE: fingerstick below 80 = within 20 points; 80 or above = within 20%.<br>
+G7 / G7 15 Day / ONE+ / Flex: same, but the switch is at 70.<br>
+Confirm against your official work instruction.<br>
     <a href="https://www.dexcom.com/en-GB/faqs/calibration" target="_blank" rel="noopener">Calibration Guidance for Dexcom CGM</a></p>
 
 
 <script>
-  // ---- Rule settings (change here if the official work instruction differs) ----
-  var SWITCH_AT = 80;      // CGM at or below this uses the points rule
-  var POINTS = 20;         // mg/dL allowed when CGM is at or below SWITCH_AT
-  var PERCENT = 20;        // percent of the fingerstick allowed when CGM is above SWITCH_AT
-  // -----------------------------------------------------------------------------
+  // ---- Rule settings (from Dexcom's published accuracy table) ----
+  var DEVICES = {
+    g6: { short: "G6 / ONE",  switchAt: 80 },   // fingerstick below 80 = points rule
+    g7: { short: "G7 family", switchAt: 70 }    // fingerstick below 70 = points rule
+  };
+  var POINTS = 20;     // mg/dL allowed when the fingerstick is below the switch value
+  var PERCENT = 20;    // percent of the fingerstick allowed at or above the switch value
+  // ----------------------------------------------------------------
 
-  var state = { cgm: "", fs: "", active: "cgm", fresh: false };
+  var state = { cgm: "", fs: "", active: "cgm", fresh: false, device: null };
+  try {
+    var saved = localStorage.getItem("cgmDevice");
+    if (saved && DEVICES[saved]) state.device = saved;
+  } catch (err) {}
 
   var el = {
     fCgm: document.getElementById("fCgm"), fFs: document.getElementById("fFs"),
     vCgm: document.getElementById("vCgm"), vFs: document.getElementById("vFs"),
-    result: document.getElementById("result"), next: document.getElementById("next")
+    result: document.getElementById("result"), next: document.getElementById("next"),
+    btnG6: document.getElementById("btnG6"), btnG7: document.getElementById("btnG7")
   };
 
-  // Integer math so edge cases (exactly 20%) are never off by a rounding error.
-  function check(cgm, fs) {
+  // The FINGERSTICK decides which rule applies. Integer math keeps exact-20% cases correct.
+  function check(cgm, fs, switchAt) {
     var diff = Math.abs(cgm - fs);
-    var usesPoints = cgm <= SWITCH_AT;
+    var usesPoints = fs < switchAt;
     var pass, lo, hi;
     if (usesPoints) {
       pass = diff <= POINTS;
-      lo = cgm - POINTS; hi = cgm + POINTS;
+      lo = fs - POINTS; hi = fs + POINTS;
     } else {
       pass = diff * 100 <= PERCENT * fs;
-      // fingerstick low end = cgm / (1 + p), round up; high end = cgm / (1 - p), round down
-      lo = Math.floor((cgm * 100 + (100 + PERCENT) - 1) / (100 + PERCENT));
-      hi = Math.floor((cgm * 100) / (100 - PERCENT));
+      lo = Math.floor((fs * (100 - PERCENT) + 99) / 100);   // round up
+      hi = Math.floor(fs * (100 + PERCENT) / 100);          // round down
     }
     return { pass: pass, usesPoints: usesPoints, lo: Math.max(lo, 0), hi: hi, diff: cgm - fs };
   }
@@ -229,29 +250,39 @@
     el.vFs.className = "value" + (state.fs === "" ? " empty" : "");
     el.fCgm.setAttribute("aria-pressed", state.active === "cgm");
     el.fFs.setAttribute("aria-pressed", state.active === "fs");
+    el.btnG6.setAttribute("aria-pressed", state.device === "g6");
+    el.btnG7.setAttribute("aria-pressed", state.device === "g7");
 
     var c = parseInt(state.cgm, 10), f = parseInt(state.fs, 10);
     var out = "";
-    if (state.cgm === "" && state.fs === "") {
+    if (!state.device) {
+      out = '<div class="verdict idle">Pick the device above (G6 or G7). Then type the CGM reading, tap Next, and type the fingerstick.</div>';
+    } else if (state.cgm === "" && state.fs === "") {
       out = '<div class="verdict idle">Type the CGM reading, tap Next, then type the fingerstick.</div>';
-      el.next.textContent = "Next";
     } else if (state.cgm === "" || state.fs === "" || c === 0 || f === 0) {
       var missing = (state.cgm === "" || c === 0) ? "the CGM reading" : "the fingerstick";
       out = '<div class="verdict idle">Waiting for ' + missing + '.</div>';
     } else {
-      var r = check(c, f);
+      var dev = DEVICES[state.device];
+      var r = check(c, f, dev.switchAt);
       var pct = Math.abs(r.diff) / f * 100;
       var dir = r.diff === 0 ? "exact match" : (r.diff > 0 ? "CGM reads higher" : "CGM reads lower");
       out = '<div class="verdict ' + (r.pass ? "pass" : "fail") + '">' + (r.pass ? "PASS" : "FAIL") + '</div>' +
         '<div class="detail"><b>' + Math.abs(r.diff) + ' points</b> apart (' + pct.toFixed(1) + '% of fingerstick), ' + dir + '.<br>' +
-        'For CGM ' + c + ', fingerstick must be <b>' + r.lo + ' to ' + r.hi + '</b>.</div>' +
-        '<div class="rule">' + (r.usesPoints
-          ? 'CGM ' + SWITCH_AT + ' or below: within ' + POINTS + ' points.'
-          : 'CGM above ' + SWITCH_AT + ': within ' + PERCENT + '% of fingerstick.') + '</div>';
-      if (c < 40 || c > 400) out += '<div class="warn">Dexcom reads 40 to 400. Double-check the CGM number.</div>';
+        'For fingerstick ' + f + ', CGM must be <b>' + r.lo + ' to ' + r.hi + '</b>.</div>' +
+        '<div class="rule">' + dev.short + ': ' + (r.usesPoints
+          ? 'fingerstick below ' + dev.switchAt + ', within ' + POINTS + ' points.'
+          : 'fingerstick ' + dev.switchAt + ' or above, within ' + PERCENT + '% of the fingerstick.') + '</div>';
+      if (c < 40 || c > 400 || f < 40 || f > 400) out += '<div class="warn">Dexcom and meters read 40 to 400. Double-check the numbers.</div>';
     }
     el.result.innerHTML = out;
     el.next.textContent = state.active === "cgm" ? "Next: fingerstick" : "Next: CGM";
+  }
+
+  function setDevice(d) {
+    state.device = d;
+    try { localStorage.setItem("cgmDevice", d); } catch (err) {}
+    render();
   }
 
   function select(which) {
@@ -265,7 +296,7 @@
     var cur = state.fresh ? "" : state[key];
     state.fresh = false;
     if (cur.length >= 3) return;
-    if (cur === "" && d === "0") { /* allow a lone 0 only as a placeholder for nothing */ return; }
+    if (cur === "" && d === "0") return;
     state[key] = cur + d;
     render();
   }
@@ -296,6 +327,8 @@
   });
   el.fCgm.addEventListener("click", function () { select("cgm"); });
   el.fFs.addEventListener("click", function () { select("fs"); });
+  el.btnG6.addEventListener("click", function () { setDevice("g6"); });
+  el.btnG7.addEventListener("click", function () { setDevice("g7"); });
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
